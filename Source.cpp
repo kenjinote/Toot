@@ -34,7 +34,7 @@ LPWSTR Post(LPCWSTR lpszServer, LPCWSTR lpszPath, LPCWSTR lpszData)
 {
 	LPWSTR lpszReturn = 0;
 	LPCWSTR hdrs = L"Content-Type: application/x-www-form-urlencoded";
-	const HINTERNET hInternet = InternetOpen(TEXT("WININET Toot Program"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	const HINTERNET hInternet = InternetOpen(TEXT("WinINet Toot Program"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (hInternet == NULL) goto END1;
 	const HINTERNET hHttpSession = InternetConnectW(hInternet, lpszServer, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
 	if (!hHttpSession) goto END2;
@@ -50,12 +50,13 @@ LPWSTR Post(LPCWSTR lpszServer, LPCWSTR lpszPath, LPCWSTR lpszData)
 		static BYTE szBuffer[1024 * 4];
 		for (;;) {
 			if (!InternetReadFile(hHttpRequest, szBuffer, (DWORD)sizeof(szBuffer), &dwRead) || !dwRead) break;
-			LPBYTE lpTemp = (LPBYTE)GlobalReAlloc(lpszByte, (SIZE_T)(dwSize + dwRead), GMEM_MOVEABLE);
+			LPBYTE lpTemp = (LPBYTE)GlobalReAlloc(lpszByte, (SIZE_T)(dwSize + dwRead + 1), GMEM_MOVEABLE);
 			if (lpTemp == NULL) break;
 			lpszByte = lpTemp;
 			CopyMemory(lpszByte + dwSize, szBuffer, dwRead);
 			dwSize += dwRead;
 		}
+		lpszByte[dwSize] = 0;
 		if (lpszByte[0]) {
 			dwTextLen = MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, 0, 0);
 			lpszReturn = (LPWSTR)GlobalAlloc(GPTR, dwTextLen * sizeof(WCHAR));
@@ -81,7 +82,8 @@ BOOL GetClientIDAndClientSecret(HWND hEditOutput, LPCWSTR lpszServer, LPWSTR lps
 	lstrcpyW(szData, L"client_name=kenjinote&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write&website=https://hack.jp");
 	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/apps", szData);
 	if (lpszReturn) {
-		SetWindowTextW(hEditOutput, lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)L"\r\n");
 		bRetutnValue = GetValueFromJSON(lpszReturn, L"client_id", lpszID) & GetValueFromJSON(lpszReturn, L"client_secret", lpszSecret);
 		GlobalFree(lpszReturn);
 	}
@@ -95,7 +97,8 @@ BOOL GetAccessToken(HWND hEditOutput, LPCWSTR lpszServer, LPCWSTR lpszID, LPCWST
 	wsprintfW(szData, L"scope=write&client_id=%s&client_secret=%s&grant_type=password&username=%s&password=%s", lpszID, lpszSecret, lpszUserName, lpszPassword);
 	LPWSTR lpszReturn = Post(lpszServer, L"/oauth/token", szData);
 	if (lpszReturn) {
-		SetWindowTextW(hEditOutput, lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)L"\r\n");
 		bRetutnValue = GetValueFromJSON(lpszReturn, L"access_token", lpszAccessToken);
 		GlobalFree(lpszReturn);
 	}
@@ -109,7 +112,8 @@ BOOL Toot(HWND hEditOutput, LPCWSTR lpszServer, LPCWSTR lpszAccessToken, LPCWSTR
 	wsprintfW(szData, L"access_token=%s&status=%s&visibility=%s", lpszAccessToken, lpszMessage, lpszVisibility);
 	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/statuses", szData);
 	if (lpszReturn) {
-		SetWindowTextW(hEditOutput, lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)lpszReturn);
+		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)L"\r\n");
 		bRetutnValue = GetValueFromJSON(lpszReturn, L"created_at", lpszCreatedAt);
 		GlobalFree(lpszReturn);
 	}
@@ -128,27 +132,28 @@ class EditBox
 				const LRESULT lResult = CallWindowProc(_this->fnEditWndProc, hWnd, msg, wParam, lParam);
 				const int nTextLength = GetWindowTextLength(hWnd);
 				if ((_this->m_lpszPlaceholder && !nTextLength) || _this->m_nLimit) {
-				const HDC hdc = GetDC(hWnd);
-				const COLORREF OldColor = SetTextColor(hdc, RGB(180, 180, 180));
-				const HFONT hOldFont = (HFONT)SelectObject(hdc, (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0));
-				const int nLeft = LOWORD(SendMessage(hWnd, EM_GETMARGINS, 0, 0));
-				if (_this->m_lpszPlaceholder && !nTextLength)
-				{
-					TextOut(hdc, nLeft + 4, 2, _this->m_lpszPlaceholder, lstrlen(_this->m_lpszPlaceholder));
+					const HDC hdc = GetDC(hWnd);
+					const COLORREF OldColor = SetTextColor(hdc, RGB(180, 180, 180));
+					const HFONT hOldFont = (HFONT)SelectObject(hdc, (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0));
+					const int nLeft = LOWORD(SendMessage(hWnd, EM_GETMARGINS, 0, 0));
+					if (_this->m_lpszPlaceholder && !nTextLength) {
+						TextOut(hdc, nLeft + 4, 2, _this->m_lpszPlaceholder, lstrlen(_this->m_lpszPlaceholder));
+					}
+					if (_this->m_nLimit) {
+						RECT rect;
+						GetClientRect(hWnd, &rect);
+						TCHAR szText[16];
+						wsprintf(szText, TEXT("%5d"), _this->m_nLimit - nTextLength);
+						DrawText(hdc, szText, -1, &rect, DT_RIGHT | DT_SINGLELINE | DT_BOTTOM);
+					}
+					SelectObject(hdc, hOldFont);
+					SetTextColor(hdc, OldColor);
+					ReleaseDC(hWnd, hdc);
+					return lResult;
 				}
-				if (_this->m_nLimit)
-				{
-					RECT rect;
-					GetClientRect(hWnd, &rect);
-					TCHAR szText[16];
-					wsprintf(szText, TEXT("%d"), _this->m_nLimit - nTextLength);
-					DrawText(hdc, szText, -1, &rect, DT_RIGHT | DT_SINGLELINE | DT_BOTTOM);
-				}
-				SelectObject(hdc, hOldFont);
-				SetTextColor(hdc, OldColor);
-				ReleaseDC(hWnd, hdc);
-				return lResult;
-				}
+			} else if (msg == WM_CHAR && wParam == 1) {
+				SendMessage(hWnd, EM_SETSEL, 0, -1);
+				return 0;
 			}
 			return CallWindowProc(_this->fnEditWndProc, hWnd, msg, wParam, lParam);
 		}
@@ -173,11 +178,30 @@ public:
 	}
 };
 
+HHOOK g_hHook;
+LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+	if (nCode == HCBT_ACTIVATE) {
+		UnhookWindowsHookEx(g_hHook);
+		const HWND hMessageBox = (HWND)wParam;
+		const HWND hParentWnd = GetParent(hMessageBox);
+		RECT rectMessageBox, rectParentWnd;
+		GetWindowRect(hMessageBox, &rectMessageBox);
+		GetWindowRect(hParentWnd, &rectParentWnd);
+		SetWindowPos(hMessageBox, hParentWnd, 
+			(rectParentWnd.right + rectParentWnd.left - rectMessageBox.right + rectMessageBox.left) >> 1,
+			(rectParentWnd.bottom + rectParentWnd.top - rectMessageBox.bottom + rectMessageBox.top) >> 1,
+			0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	return 0;
+}
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	static EditBox *pEdit1, *pEdit2, *pEdit3, *pEdit4;
 	static HWND hEdit5, hCombo, hButton;
 	static HFONT hFont;
+	static WCHAR szAccessToken[65];
 	switch (msg) {
 	case WM_CREATE:
 		hFont = CreateFont(24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Yu Gothic UI"));
@@ -197,7 +221,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("自分のフォロワーにのみ公開")), (LPARAM)TEXT("private"));
 		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("非公開・ダイレクトメッセージ（自分と@ユーザーのみ閲覧可）")), (LPARAM)TEXT("direct"));
 		SendMessage(hCombo, CB_SETCURSEL, 0, 0);
-		hButton = CreateWindow(TEXT("BUTTON"), TEXT("投 稿"), WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)1000, ((LPCREATESTRUCT)lParam)->hInstance, 0);
+		hButton = CreateWindow(TEXT("BUTTON"), TEXT("トゥート!"), WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)1000, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessage(hButton, WM_SETFONT, (WPARAM)hFont, 0);
 		hEdit5 = CreateWindowEx(WS_EX_CLIENTEDGE, TEXT("EDIT"), 0, WS_VISIBLE | WS_CHILD | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_READONLY, 0, 0, 0, 0, hWnd, 0, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessage(hEdit5, WM_SETFONT, (WPARAM)hFont, 0);
@@ -206,39 +230,49 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		MoveWindow(pEdit1->m_hWnd, 10, 10, LOWORD(lParam) - 20, 32, TRUE);
 		MoveWindow(pEdit2->m_hWnd, 10, 50, LOWORD(lParam) - 20, 32, TRUE);
 		MoveWindow(pEdit3->m_hWnd, 10, 90, LOWORD(lParam) - 20, 32, TRUE);
-		MoveWindow(pEdit4->m_hWnd, 10, 130, LOWORD(lParam) - 20, 96, TRUE);
-		MoveWindow(hCombo, 10, 234, LOWORD(lParam) - 20, 256, TRUE);
-		MoveWindow(hButton, 10, 274, LOWORD(lParam) - 20, 32, TRUE);
-		MoveWindow(hEdit5, 10, 314, LOWORD(lParam) - 20, HIWORD(lParam) - 324, TRUE);
+		MoveWindow(pEdit4->m_hWnd, 10, 130, LOWORD(lParam) - 20, HIWORD(lParam) - 324, TRUE);
+		MoveWindow(hCombo, 10, HIWORD(lParam) - 184, LOWORD(lParam) - 20, 256, TRUE);
+		MoveWindow(hButton, 10, HIWORD(lParam) - 142, LOWORD(lParam) - 20, 32, TRUE);
+		MoveWindow(hEdit5, 10, HIWORD(lParam) - 100, LOWORD(lParam) - 20, 90, TRUE);
 		break;
 	case WM_COMMAND:
 		if (HIWORD(wParam) == EN_CHANGE) {
 			InvalidateRect((HWND)lParam, 0, 0);
 		}
 		else if (LOWORD(wParam) == 1000) {
+			SetWindowText(hEdit5, 0);
 			WCHAR szServer[256] = { 0 };
 			GetWindowTextW(pEdit1->m_hWnd, szServer, _countof(szServer));
-			WCHAR szUserName[256] = { 0 };
-			GetWindowTextW(pEdit2->m_hWnd, szUserName, _countof(szUserName));
-			WCHAR szPassword[256] = { 0 };
-			GetWindowTextW(pEdit3->m_hWnd, szPassword, _countof(szPassword));
+			URL_COMPONENTSW uc = { sizeof(uc) };
+			WCHAR szHostName[256] = { 0 };
+			uc.lpszHostName = szHostName;
+			uc.dwHostNameLength = _countof(szHostName);
+			if (InternetCrackUrlW(szServer, 0, 0, &uc)) {
+				lstrcpyW(szServer, szHostName);
+			}
+			BOOL bSuccess = FALSE;
+			if (!lstrlen(szAccessToken)) {
+				WCHAR szUserName[256] = { 0 };
+				GetWindowTextW(pEdit2->m_hWnd, szUserName, _countof(szUserName));
+				WCHAR szPassword[256] = { 0 };
+				GetWindowTextW(pEdit3->m_hWnd, szPassword, _countof(szPassword));
+				WCHAR szClientID[65] = { 0 };
+				WCHAR szSecret[65] = { 0 };
+				bSuccess = GetClientIDAndClientSecret(hEdit5, szServer, szClientID, szSecret);
+				if (!bSuccess) return 0;
+				bSuccess = GetAccessToken(hEdit5, szServer, szClientID, szSecret, szUserName, szPassword, szAccessToken);
+				if (!bSuccess) return 0;
+			}
 			WCHAR szMessage[501] = { 0 };
 			GetWindowTextW(pEdit4->m_hWnd, szMessage, _countof(szMessage));
 			const int nVisibility = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
 			LPCWSTR lpszVisibility = (LPCWSTR)SendMessage(hCombo, CB_GETITEMDATA, nVisibility, 0);
-			BOOL bSuccess = FALSE;
-			WCHAR szClientID[65] = { 0 };
-			WCHAR szSecret[65] = { 0 };
-			bSuccess = GetClientIDAndClientSecret(hEdit5, szServer, szClientID, szSecret);
-			if (!bSuccess) return 0;
-			WCHAR szAccessToken[65] = { 0 };
-			bSuccess = GetAccessToken(hEdit5, szServer, szClientID, szSecret, szUserName, szPassword, szAccessToken);
-			if (!bSuccess) return 0;
 			WCHAR szCreatedAt[32] = { 0 };
 			bSuccess = Toot(hEdit5, szServer, szAccessToken, szMessage, lpszVisibility, szCreatedAt);
 			if (!bSuccess) return 0;
 			WCHAR szResult[1024];
 			wsprintfW(szResult, L"投稿されました。\n投稿日時 = %s", szCreatedAt);
+			g_hHook = SetWindowsHookEx(WH_CBT, CBTProc, 0, GetCurrentThreadId());
 			MessageBoxW(hWnd, szResult, L"確認", 0);
 			SetWindowText(pEdit4->m_hWnd, 0);
 			SetFocus(pEdit4->m_hWnd);
@@ -264,10 +298,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPreInst, LPSTR pCmdLine, int nCmdShow)
 {
 	const TCHAR szClassName[] = TEXT("TootWindow");
-	MSG msg;
+	MSG msg = { 0 };
 	const WNDCLASS wndclass = { 0,WndProc,0,DLGWINDOWEXTRA,hInstance,LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1)),LoadCursor(0,IDC_ARROW),0,0,szClassName };
 	RegisterClass(&wndclass);
-	const HWND hWnd = CreateWindow(szClassName, TEXT("Toot"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 512, 512, 0, 0, hInstance, 0);
+	const HWND hWnd = CreateWindow(szClassName, TEXT("トゥートする"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 512, 512, 0, 0, hInstance, 0);
 	ShowWindow(hWnd, SW_SHOWDEFAULT);
 	UpdateWindow(hWnd);
 	while (GetMessage(&msg, 0, 0, 0)) {
