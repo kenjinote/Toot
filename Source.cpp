@@ -118,42 +118,59 @@ BOOL Toot(HWND hEditOutput, LPCWSTR lpszServer, LPCWSTR lpszAccessToken, LPCWSTR
 
 class EditBox
 {
-	WNDPROC EditWndProc;
+	WNDPROC fnEditWndProc;
 	LPTSTR m_lpszPlaceholder;
-	static LRESULT CALLBACK EditProc1(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	int m_nLimit;
+	static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		EditBox* _this = (EditBox*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 		if (_this) {
-			if (msg == WM_PAINT && !GetWindowTextLength(hWnd)) {
-				const LRESULT lResult = CallWindowProc(_this->EditWndProc, hWnd, msg, wParam, lParam);
+			if (msg == WM_PAINT) {
+				const LRESULT lResult = CallWindowProc(_this->fnEditWndProc, hWnd, msg, wParam, lParam);
+				const int nTextLength = GetWindowTextLength(hWnd);
+				if ((_this->m_lpszPlaceholder && !nTextLength) || _this->m_nLimit) {
 				const HDC hdc = GetDC(hWnd);
 				const COLORREF OldColor = SetTextColor(hdc, RGB(180, 180, 180));
 				const HFONT hOldFont = (HFONT)SelectObject(hdc, (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0));
 				const int nLeft = LOWORD(SendMessage(hWnd, EM_GETMARGINS, 0, 0));
-				TextOut(hdc, nLeft + 4, 2, _this->m_lpszPlaceholder, lstrlen(_this->m_lpszPlaceholder));
+				if (_this->m_lpszPlaceholder && !nTextLength)
+				{
+					TextOut(hdc, nLeft + 4, 2, _this->m_lpszPlaceholder, lstrlen(_this->m_lpszPlaceholder));
+				}
+				if (_this->m_nLimit)
+				{
+					RECT rect;
+					GetClientRect(hWnd, &rect);
+					TCHAR szText[16];
+					wsprintf(szText, TEXT("%d"), _this->m_nLimit - nTextLength);
+					DrawText(hdc, szText, -1, &rect, DT_RIGHT | DT_SINGLELINE | DT_BOTTOM);
+				}
 				SelectObject(hdc, hOldFont);
 				SetTextColor(hdc, OldColor);
 				ReleaseDC(hWnd, hdc);
 				return lResult;
+				}
 			}
-			return CallWindowProc(_this->EditWndProc, hWnd, msg, wParam, lParam);
+			return CallWindowProc(_this->fnEditWndProc, hWnd, msg, wParam, lParam);
 		}
 		return 0;
 	}
 public:
 	HWND m_hWnd;
 	EditBox(LPCTSTR lpszDefaultText, DWORD dwStyle, int x, int y, int width, int height, HWND hParent, HMENU hMenu, LPCTSTR lpszPlaceholder)
-		: m_hWnd(0)
-		, EditWndProc(0)
-		, m_lpszPlaceholder(0) {
+		: m_hWnd(0), m_nLimit(0), fnEditWndProc(0), m_lpszPlaceholder(0) {
 		if (lpszPlaceholder && !m_lpszPlaceholder) {
 			m_lpszPlaceholder = (LPTSTR)GlobalAlloc(0, sizeof(TCHAR) * (lstrlen(lpszPlaceholder) + 1));
 			lstrcpy(m_lpszPlaceholder, lpszPlaceholder);
 		}
 		m_hWnd = CreateWindowEx(WS_EX_CLIENTEDGE, TEXT("EDIT"), lpszDefaultText, dwStyle, x, y, width, height, hParent, hMenu, GetModuleHandle(0), 0);
 		SetWindowLongPtr(m_hWnd, GWLP_USERDATA, (LONG_PTR)this);
-		EditWndProc = (WNDPROC)SetWindowLongPtr(m_hWnd, GWLP_WNDPROC, (LONG_PTR)EditProc1);
+		fnEditWndProc = (WNDPROC)SetWindowLongPtr(m_hWnd, GWLP_WNDPROC, (LONG_PTR)WndProc);
 	}
 	~EditBox() { DestroyWindow(m_hWnd); GlobalFree(m_lpszPlaceholder); }
+	void SetLimit(int nLimit) {
+		SendMessage(m_hWnd, EM_LIMITTEXT, nLimit, 0);
+		m_nLimit = nLimit;
+	}
 };
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -172,13 +189,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		SendMessage(pEdit3->m_hWnd, WM_SETFONT, (WPARAM)hFont, 0);
 		pEdit4 = new EditBox(0, WS_VISIBLE | WS_CHILD | WS_TABSTOP | ES_AUTOVSCROLL | ES_MULTILINE | ES_WANTRETURN, 0, 0, 0, 0, hWnd, 0, TEXT("今何してる？"));
 		SendMessage(pEdit4->m_hWnd, WM_SETFONT, (WPARAM)hFont, 0);
-		SendMessage(pEdit4->m_hWnd, EM_LIMITTEXT, 500, 0);
+		pEdit4->SetLimit(500);
 		hCombo = CreateWindow(TEXT("COMBOBOX"), 0, WS_VISIBLE | WS_CHILD | WS_TABSTOP | CBS_DROPDOWNLIST, 0, 0, 0, 0, hWnd, 0, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessage(hCombo, WM_SETFONT, (WPARAM)hFont, 0);
-		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("公開")), (LPARAM)TEXT("public"));
-		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("非公開")), (LPARAM)TEXT("private"));
-		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("フォロアーのみ閲覧")), (LPARAM)TEXT("unlisted"));
-		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("ダイレクトメッセージ")), (LPARAM)TEXT("direct"));
+		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("全体に公開")), (LPARAM)TEXT("public"));
+		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("自分のタイムラインでのみ公開（公開タイムラインには表示しない）")), (LPARAM)TEXT("unlisted"));
+		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("自分のフォロワーにのみ公開")), (LPARAM)TEXT("private"));
+		SendMessage(hCombo, CB_SETITEMDATA, SendMessage(hCombo, CB_ADDSTRING, 0, (LPARAM)TEXT("非公開・ダイレクトメッセージ（自分と@ユーザーのみ閲覧可）")), (LPARAM)TEXT("direct"));
 		SendMessage(hCombo, CB_SETCURSEL, 0, 0);
 		hButton = CreateWindow(TEXT("BUTTON"), TEXT("投 稿"), WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)1000, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessage(hButton, WM_SETFONT, (WPARAM)hFont, 0);
@@ -195,7 +212,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		MoveWindow(hEdit5, 10, 314, LOWORD(lParam) - 20, HIWORD(lParam) - 324, TRUE);
 		break;
 	case WM_COMMAND:
-		if (LOWORD(wParam) == 1000) {
+		if (HIWORD(wParam) == EN_CHANGE) {
+			InvalidateRect((HWND)lParam, 0, 0);
+		}
+		else if (LOWORD(wParam) == 1000) {
 			WCHAR szServer[256] = { 0 };
 			GetWindowTextW(pEdit1->m_hWnd, szServer, _countof(szServer));
 			WCHAR szUserName[256] = { 0 };
