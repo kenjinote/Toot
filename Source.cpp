@@ -149,8 +149,8 @@ class EditBox
 					SelectObject(hdc, hOldFont);
 					SetTextColor(hdc, OldColor);
 					ReleaseDC(hWnd, hdc);
-					return lResult;
 				}
+				return lResult;
 			} else if (msg == WM_CHAR && wParam == 1) {
 				SendMessage(hWnd, EM_SETSEL, 0, -1);
 				return 0;
