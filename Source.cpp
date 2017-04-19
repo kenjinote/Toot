@@ -34,7 +34,7 @@ LPWSTR Post(LPCWSTR lpszServer, LPCWSTR lpszPath, LPCWSTR lpszData)
 {
 	LPWSTR lpszReturn = 0;
 	LPCWSTR hdrs = L"Content-Type: application/x-www-form-urlencoded";
-	const HINTERNET hInternet = InternetOpen(TEXT("WinINet Toot Program"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	const HINTERNET hInternet = InternetOpen(TEXT("WinInet Toot Program"), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (hInternet == NULL) goto END1;
 	const HINTERNET hHttpSession = InternetConnectW(hInternet, lpszServer, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
 	if (!hHttpSession) goto END2;
@@ -297,11 +297,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPreInst, LPSTR pCmdLine, int nCmdShow)
 {
-	const TCHAR szClassName[] = TEXT("TootWindow");
+	LPCTSTR lpszClassName = TEXT("TootWindow");
 	MSG msg = { 0 };
-	const WNDCLASS wndclass = { 0,WndProc,0,DLGWINDOWEXTRA,hInstance,LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1)),LoadCursor(0,IDC_ARROW),0,0,szClassName };
+	const WNDCLASS wndclass = { 0,WndProc,0,DLGWINDOWEXTRA,hInstance,LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1)),LoadCursor(0,IDC_ARROW),0,0,lpszClassName };
 	RegisterClass(&wndclass);
-	const HWND hWnd = CreateWindow(szClassName, TEXT("トゥートする"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 512, 512, 0, 0, hInstance, 0);
+	const HWND hWnd = CreateWindow(lpszClassName, TEXT("トゥートする"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 512, 512, 0, 0, hInstance, 0);
 	ShowWindow(hWnd, SW_SHOWDEFAULT);
 	UpdateWindow(hWnd);
 	while (GetMessage(&msg, 0, 0, 0)) {
