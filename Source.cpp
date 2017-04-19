@@ -79,7 +79,7 @@ BOOL GetClientIDAndClientSecret(HWND hEditOutput, LPCWSTR lpszServer, LPWSTR lps
 {
 	BOOL bRetutnValue = FALSE;
 	WCHAR szData[1024];
-	lstrcpyW(szData, L"client_name=kenjinote&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write&website=https://hack.jp");
+	lstrcpyW(szData, L"client_name=TootApp&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write");
 	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/apps", szData);
 	if (lpszReturn) {
 		SendMessageW(hEditOutput, EM_REPLACESEL, 0, (LPARAM)lpszReturn);
@@ -202,6 +202,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	static HWND hEdit5, hCombo, hButton;
 	static HFONT hFont;
 	static WCHAR szAccessToken[65];
+	static BOOL bModified;
 	switch (msg) {
 	case WM_CREATE:
 		hFont = CreateFont(24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, TEXT("Yu Gothic UI"));
@@ -238,6 +239,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_COMMAND:
 		if (HIWORD(wParam) == EN_CHANGE) {
 			InvalidateRect((HWND)lParam, 0, 0);
+			if (pEdit1->m_hWnd == (HWND)lParam || pEdit2->m_hWnd == (HWND)lParam) bModified = TRUE;
 		}
 		else if (LOWORD(wParam) == 1000) {
 			SetWindowText(hEdit5, 0);
@@ -250,26 +252,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			if (InternetCrackUrlW(szServer, 0, 0, &uc)) {
 				lstrcpyW(szServer, szHostName);
 			}
-			BOOL bSuccess = FALSE;
-			if (!lstrlen(szAccessToken)) {
+			if (bModified || !lstrlen(szAccessToken)) {
 				WCHAR szUserName[256] = { 0 };
 				GetWindowTextW(pEdit2->m_hWnd, szUserName, _countof(szUserName));
 				WCHAR szPassword[256] = { 0 };
 				GetWindowTextW(pEdit3->m_hWnd, szPassword, _countof(szPassword));
 				WCHAR szClientID[65] = { 0 };
 				WCHAR szSecret[65] = { 0 };
-				bSuccess = GetClientIDAndClientSecret(hEdit5, szServer, szClientID, szSecret);
-				if (!bSuccess) return 0;
-				bSuccess = GetAccessToken(hEdit5, szServer, szClientID, szSecret, szUserName, szPassword, szAccessToken);
-				if (!bSuccess) return 0;
+				if (!GetClientIDAndClientSecret(hEdit5, szServer, szClientID, szSecret)) return 0;
+				if (!GetAccessToken(hEdit5, szServer, szClientID, szSecret, szUserName, szPassword, szAccessToken)) return 0;
+				bModified = FALSE;
 			}
 			WCHAR szMessage[501] = { 0 };
 			GetWindowTextW(pEdit4->m_hWnd, szMessage, _countof(szMessage));
 			const int nVisibility = (int)SendMessage(hCombo, CB_GETCURSEL, 0, 0);
 			LPCWSTR lpszVisibility = (LPCWSTR)SendMessage(hCombo, CB_GETITEMDATA, nVisibility, 0);
 			WCHAR szCreatedAt[32] = { 0 };
-			bSuccess = Toot(hEdit5, szServer, szAccessToken, szMessage, lpszVisibility, szCreatedAt);
-			if (!bSuccess) return 0;
+			if (!Toot(hEdit5, szServer, szAccessToken, szMessage, lpszVisibility, szCreatedAt)) return 0;
 			WCHAR szResult[1024];
 			wsprintfW(szResult, L"投稿されました。\n投稿日時 = %s", szCreatedAt);
 			g_hHook = SetWindowsHookEx(WH_CBT, CBTProc, 0, GetCurrentThreadId());
