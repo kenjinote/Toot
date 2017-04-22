@@ -253,6 +253,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				lstrcpyW(szServer, szHostName);
 			}
 			if (bModified || !lstrlen(szAccessToken)) {
+				InternetSetOption(0, INTERNET_OPTION_END_BROWSER_SESSION, 0, 0);
 				WCHAR szUserName[256] = { 0 };
 				GetWindowTextW(pEdit2->m_hWnd, szUserName, _countof(szUserName));
 				WCHAR szPassword[256] = { 0 };
