@@ -3,16 +3,54 @@
 #pragma comment(lib, "wininet")
 #pragma comment(lib, "gdiplus")
 #pragma comment(lib, "shlwapi")
+#pragma comment(lib, "dwmapi")
 
 #include <windows.h>
-#include <wininet.h>
+#include <windowsx.h>
+#include <dwmapi.h>
 #include <gdiplus.h>
 #include <shlwapi.h>
-#include <ShlObj.h>
+#include <shlobj.h>
+#include <wininet.h>
 #include <string>
 #include <list>
 #include <vector>
 #include "resource.h"
+
+Gdiplus::Bitmap* LoadBitmapFromResource(int nID, LPCWSTR lpszType)
+{
+	Gdiplus::Bitmap* pBitmap = 0;
+	const HINSTANCE hInstance = GetModuleHandle(0);
+	const HRSRC hResource = FindResourceW(hInstance, MAKEINTRESOURCE(nID), lpszType);
+	if (!hResource)
+		return 0;
+	const DWORD dwImageSize = SizeofResource(hInstance, hResource);
+	if (!dwImageSize)
+		return 0;
+	const void* pResourceData = LockResource(LoadResource(hInstance, hResource));
+	if (!pResourceData)
+		return 0;
+	const HGLOBAL hBuffer = GlobalAlloc(GMEM_MOVEABLE, dwImageSize);
+	if (hBuffer) {
+		void* pBuffer = GlobalLock(hBuffer);
+		if (pBuffer) {
+			CopyMemory(pBuffer, pResourceData, dwImageSize);
+			IStream* pStream = NULL;
+			if (CreateStreamOnHGlobal(hBuffer, TRUE, &pStream) == S_OK) {
+				pBitmap = Gdiplus::Bitmap::FromStream(pStream);
+				if (pBitmap) {
+					if (pBitmap->GetLastStatus() != Gdiplus::Ok) {
+						delete pBitmap;
+						pBitmap = NULL;
+					}
+				}
+				pStream->Release();
+			}
+			GlobalUnlock(hBuffer);
+		}
+	}
+	return pBitmap;
+}
 
 std::wstring Trim(const std::wstring& string, LPCWSTR trimCharacterList = L" \"\t\v\r\n") {
 	std::wstring result;
@@ -198,7 +236,7 @@ class EditBox {
 				if ((_this->m_lpszPlaceholder && !nTextLength) || _this->m_nLimit) {
 					const HDC hdc = GetDC(hWnd);
 					const COLORREF OldTextColor = SetTextColor(hdc, RGB(180, 180, 180));
-					const COLORREF OldBkColor = SetBkColor(hdc, RGB(255,255,255));
+					const COLORREF OldBkColor = SetBkColor(hdc, RGB(255, 255, 255));
 					const HFONT hOldFont = (HFONT)SelectObject(hdc, (HFONT)SendMessageW(hWnd, WM_GETFONT, 0, 0));
 					const int nLeft = LOWORD(SendMessageW(hWnd, EM_GETMARGINS, 0, 0));
 					if (_this->m_lpszPlaceholder && !nTextLength) {
@@ -251,6 +289,19 @@ class BitmapEx : public Gdiplus::Bitmap {
 public:
 	LPBYTE m_lpByte;
 	DWORD m_nSize;
+	BitmapEx(IN HBITMAP hbm)
+		: Gdiplus::Bitmap::Bitmap(hbm, 0)
+		, m_lpByte(0), m_nSize(0) {
+		Gdiplus::Status OldlastResult = GetLastStatus();
+		if (OldlastResult == Gdiplus::Ok) {
+			GUID guid;
+			if (GetRawFormat(&guid) == Gdiplus::Ok) {
+			}
+		}
+		else {
+			lastResult = OldlastResult;
+		}
+	}
 	BitmapEx(const WCHAR *filename)
 		: Gdiplus::Bitmap::Bitmap(filename)
 		, m_lpByte(0), m_nSize(0) {
@@ -275,7 +326,8 @@ public:
 					}
 				}
 			}
-		} else {
+		}
+		else {
 			lastResult = Gdiplus::UnknownImageFormat;
 		}
 	}
@@ -284,6 +336,134 @@ public:
 		m_lpByte = 0;
 	}
 };
+
+BitmapEx * WindowCapture(HWND hWnd)
+{
+	BitmapEx * pBitmap = 0;
+	RECT rect1;
+	GetWindowRect(hWnd, &rect1);
+	RECT rect2;
+	if (DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect2, sizeof(rect2)) != S_OK) rect2 = rect1;
+	HDC hdc = GetDC(0);
+	HDC hMem = CreateCompatibleDC(hdc);
+	HBITMAP hBitmap = CreateCompatibleBitmap(hdc, rect2.right - rect2.left, rect2.bottom - rect2.top);
+	if (hBitmap) {
+		HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMem, hBitmap);
+		SetForegroundWindow(hWnd);
+		InvalidateRect(hWnd, 0, 1);
+		UpdateWindow(hWnd);
+		BitBlt(hMem, 0, 0, rect2.right - rect2.left, rect2.bottom - rect2.top, hdc, rect2.left, rect2.top, SRCCOPY);
+		pBitmap = new BitmapEx(hBitmap);
+		SelectObject(hMem, hOldBitmap);
+		DeleteObject(hBitmap);
+	}
+	DeleteDC(hMem);
+	ReleaseDC(0, hdc);
+	return pBitmap;
+}
+
+BitmapEx * ScreenCapture(LPRECT lpRect)
+{
+	BitmapEx * pBitmap = 0;
+	HDC hdc = GetDC(0);
+	HDC hMem = CreateCompatibleDC(hdc);
+	HBITMAP hBitmap = CreateCompatibleBitmap(hdc, lpRect->right - lpRect->left, lpRect->bottom - lpRect->top);
+	if (hBitmap) {
+		HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMem, hBitmap);
+		BitBlt(hMem, 0, 0, lpRect->right - lpRect->left, lpRect->bottom - lpRect->top, hdc, lpRect->left, lpRect->top, SRCCOPY);
+		pBitmap = new BitmapEx(hBitmap);
+		SelectObject(hMem, hOldBitmap);
+		DeleteObject(hBitmap);
+	}
+	DeleteDC(hMem);
+	ReleaseDC(0, hdc);
+	return pBitmap;
+}
+
+LRESULT CALLBACK LayerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	static HWND hParentWnd;
+	static BOOL bDrag;
+	static BOOL bDown;
+	static POINT posStart;
+	static RECT OldRect;
+	switch (msg) {
+	case WM_CREATE:
+		hParentWnd = (HWND)((LPCREATESTRUCT)lParam)->lpCreateParams;
+		break;
+	case WM_KEYDOWN:
+	case WM_RBUTTONDOWN:
+		SendMessage(hWnd, WM_CLOSE, 0, 0);
+		break;
+	case WM_LBUTTONDOWN:
+	{
+		int xPos = GET_X_LPARAM(lParam);
+		int yPos = GET_Y_LPARAM(lParam);
+		POINT point = { xPos, yPos };
+		ClientToScreen(hWnd, &point);
+		posStart = point;
+		SetCapture(hWnd);
+	}
+	break;
+	case WM_MOUSEMOVE:
+		if (GetCapture() == hWnd)
+		{
+			int xPos = GET_X_LPARAM(lParam);
+			int yPos = GET_Y_LPARAM(lParam);
+			POINT point = { xPos, yPos };
+			ClientToScreen(hWnd, &point);
+			if (!bDrag) {
+				if (abs(xPos - posStart.x) > GetSystemMetrics(SM_CXDRAG) && abs(yPos - posStart.y) > GetSystemMetrics(SM_CYDRAG)) {
+					bDrag = TRUE;
+				}
+			}
+			else {
+				HDC hdc = GetDC(hWnd);
+				RECT rect = { min(point.x, posStart.x), min(point.y, posStart.y), max(point.x, posStart.x), max(point.y, posStart.y) };
+				HBRUSH hBrush = CreateSolidBrush(RGB(255, 0, 0));
+				HRGN hRgn1 = CreateRectRgn(OldRect.left, OldRect.top, OldRect.right, OldRect.bottom);
+				HRGN hRgn2 = CreateRectRgn(rect.left, rect.top, rect.right, rect.bottom);
+				CombineRgn(hRgn1, hRgn1, hRgn2, RGN_DIFF);
+				FillRgn(hdc, hRgn1, (HBRUSH)GetStockObject(BLACK_BRUSH));
+				FillRect(hdc, &rect, hBrush);
+				OldRect = rect;
+				DeleteObject(hBrush);
+				DeleteObject(hRgn1);
+				DeleteObject(hRgn2);
+				ReleaseDC(hWnd, hdc);
+			}
+		}
+		break;
+	case WM_LBUTTONUP:
+		if (GetCapture() == hWnd) {
+			ReleaseCapture();
+			Gdiplus::Bitmap * pBitmap = 0;
+			if (bDrag) {
+				bDrag = FALSE;
+				int xPos = GET_X_LPARAM(lParam);
+				int yPos = GET_Y_LPARAM(lParam);
+				POINT point = { xPos, yPos };
+				ClientToScreen(hWnd, &point);
+				RECT rect = { min(point.x, posStart.x), min(point.y, posStart.y), max(point.x, posStart.x), max(point.y, posStart.y) };
+				ShowWindow(hWnd, SW_HIDE);
+				pBitmap = ScreenCapture(&rect);
+			}
+			else {
+				ShowWindow(hWnd, SW_HIDE);
+				HWND hTargetWnd = WindowFromPoint(posStart);
+				hTargetWnd = GetAncestor(hTargetWnd, GA_ROOT);
+				if (hTargetWnd) {
+					pBitmap = WindowCapture(hTargetWnd);
+				}
+			}
+			SendMessage(hParentWnd, WM_APP, 0, (LPARAM)pBitmap);
+		}
+		break;
+	default:
+		return DefWindowProc(hWnd, msg, wParam, lParam);
+	}
+	return 0;
+}
 
 class ImageListPanel {
 	BOOL m_bDrag;
@@ -295,6 +475,7 @@ class ImageListPanel {
 	HFONT m_hFont;
 	std::list<BitmapEx*> m_listBitmap;
 	WNDPROC fnWndProc;
+	Gdiplus::Bitmap *m_pCameraIcon;
 	BOOL MoveImage(int nIndexFrom, int nIndexTo) {
 		if (nIndexFrom < 0) nIndexFrom = 0;
 		if (nIndexTo < 0) nIndexTo = 0;
@@ -321,7 +502,7 @@ class ImageListPanel {
 				UINT iFile, nFiles;
 				nFiles = DragQueryFile((HDROP)hDrop, 0xFFFFFFFF, NULL, 0);
 				BOOL bUpdate = FALSE;
-				for (iFile = 0; iFile<nFiles; ++iFile) {
+				for (iFile = 0; iFile < nFiles; ++iFile) {
 					if ((int)_this->m_listBitmap.size() >= _this->m_nImageMaxCount) break;
 					DragQueryFileW(hDrop, iFile, szFileName, _countof(szFileName));
 					BitmapEx* pBitmap = new BitmapEx(szFileName);
@@ -329,7 +510,8 @@ class ImageListPanel {
 						if (pBitmap->GetLastStatus() == Gdiplus::Ok) {
 							_this->m_listBitmap.push_back(pBitmap);
 							bUpdate = TRUE;
-						} else {
+						}
+						else {
 							delete pBitmap;
 						}
 					}
@@ -368,15 +550,45 @@ class ImageListPanel {
 							nTop += nHeight + _this->m_nMargin;
 						}
 					}
+					int nCameraIconWidth = _this->m_pCameraIcon->GetWidth();
+					int nCameraIconHeigth = _this->m_pCameraIcon->GetHeight();
+					g.DrawImage(_this->m_pCameraIcon, rect.right - nCameraIconWidth - 2, rect.bottom - nCameraIconHeigth - 2, nCameraIconWidth, nCameraIconHeigth);
 				}
 				EndPaint(hWnd, &ps);
 			}
 			return 0;
+			case WM_APP:
+			{
+				BitmapEx* pBitmap = (BitmapEx*)lParam;
+				BOOL bPushed = FALSE;
+				if ((int)_this->m_listBitmap.size() < _this->m_nImageMaxCount) {
+					if (pBitmap) {
+						_this->m_listBitmap.push_back(pBitmap);
+						InvalidateRect(hWnd, 0, 1);
+						bPushed = TRUE;
+					}					
+				}
+				if (!bPushed)
+					delete pBitmap;
+				SetForegroundWindow(hWnd);
+			}
+			break;
 			case WM_LBUTTONDOWN:
 			{
 				RECT rect;
 				GetClientRect(hWnd, &rect);
 				POINT point = { LOWORD(lParam), HIWORD(lParam) };
+				int nCameraIconWidth = _this->m_pCameraIcon->GetWidth();
+				int nCameraIconHeigth = _this->m_pCameraIcon->GetHeight();
+				RECT rectCameraIcon = { rect.right - nCameraIconWidth - 2, rect.bottom - nCameraIconHeigth - 2, rect.right, rect.bottom };
+				if (PtInRect(&rectCameraIcon, point)) {
+					HWND hLayerWnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST, L"LayerWindow", 0, WS_POPUP, 0, 0, 0, 0, 0, 0, GetModuleHandle(0), (LPVOID)hWnd);
+					SetLayeredWindowAttributes(hLayerWnd, RGB(255, 0, 0), 64, LWA_ALPHA | LWA_COLORKEY);
+					SetWindowPos(hLayerWnd, HWND_TOPMOST, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN), SWP_NOSENDCHANGING);
+					ShowWindow(hLayerWnd, SW_NORMAL);
+					UpdateWindow(hLayerWnd);
+					return 0;
+				}
 				INT nTop = _this->m_nMargin;
 				int nWidth = rect.right - 2 * _this->m_nMargin;
 				for (auto it = _this->m_listBitmap.begin(); it != _this->m_listBitmap.end(); ++it) {
@@ -424,7 +636,8 @@ class ImageListPanel {
 							if (pBitmap->GetLastStatus() == Gdiplus::Ok) {
 								_this->m_listBitmap.push_back(pBitmap);
 								InvalidateRect(hWnd, 0, 1);
-							} else {
+							}
+							else {
 								delete pBitmap;
 							}
 						}
@@ -449,7 +662,8 @@ class ImageListPanel {
 							if (nCursorY < nTop + nHeight / 2 + _this->m_nMargin) {
 								nCurrentIndex = nIndex;
 								nCurrentPosY = nTop;
-							} else {
+							}
+							else {
 								nCurrentIndex = nIndex + 1;
 								nCurrentPosY = nTop + nHeight + _this->m_nMargin;
 							}
@@ -507,13 +721,18 @@ public:
 		, m_bDrag(0)
 		, m_nSplitPrevIndex(-1)
 		, m_nSplitPrevPosY(0)
-		, m_hFont(hFont) {
-		WNDCLASSW wndclass = { CS_HREDRAW | CS_VREDRAW,WndProc,0,0,GetModuleHandle(0),0,LoadCursor(0,IDC_ARROW),(HBRUSH)(COLOR_WINDOW + 1),0,__FUNCTIONW__ };
-		RegisterClassW(&wndclass);
+		, m_hFont(hFont)
+		, m_pCameraIcon(0) {
+		m_pCameraIcon = LoadBitmapFromResource(IDB_PNG1, L"PNG");
+		WNDCLASSW wndclass1 = { 0,LayerWndProc,0,0,GetModuleHandle(0),0,LoadCursor(0,IDC_CROSS),(HBRUSH)GetStockObject(BLACK_BRUSH),0,L"LayerWindow" };
+		RegisterClassW(&wndclass1);
+		WNDCLASSW wndclass2 = { CS_HREDRAW | CS_VREDRAW,WndProc,0,0,GetModuleHandle(0),0,LoadCursor(0,IDC_ARROW),(HBRUSH)(COLOR_WINDOW + 1),0,__FUNCTIONW__ };
+		RegisterClassW(&wndclass2);
 		m_hWnd = CreateWindowW(__FUNCTIONW__, 0, dwStyle, x, y, width, height, hParent, 0, GetModuleHandle(0), this);
 	}
 	~ImageListPanel() {
 		RemoveAllImage();
+		delete m_pCameraIcon;
 	}
 	int GetImageCount() { return (int)m_listBitmap.size(); }
 	BitmapEx * GetImage(int nIndex) {
@@ -616,9 +835,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		MoveWindow(pEdit3->m_hWnd, 10, 90, LOWORD(lParam) - 20, 32, TRUE);
 		MoveWindow(pEdit4->m_hWnd, 10, 130, LOWORD(lParam) - 158, HIWORD(lParam) - 324 + 90, TRUE);
 		MoveWindow(pImageListPanel->m_hWnd, LOWORD(lParam) - 138, 130, 128, HIWORD(lParam) - 356 + 90, TRUE);
-		MoveWindow(hCheckNsfw, LOWORD(lParam) - 10 - 128, HIWORD(lParam) - 226+90, 128, 32, TRUE);
+		MoveWindow(hCheckNsfw, LOWORD(lParam) - 10 - 128, HIWORD(lParam) - 226 + 90, 128, 32, TRUE);
 		MoveWindow(hCombo, 10, HIWORD(lParam) - 184 + 90, LOWORD(lParam) - 20, 256, TRUE);
-		MoveWindow(hButton, 10, HIWORD(lParam) - 142+90, LOWORD(lParam) - 20, 32, TRUE);
+		MoveWindow(hButton, 10, HIWORD(lParam) - 142 + 90, LOWORD(lParam) - 20, 32, TRUE);
 		break;
 	case WM_COMMAND:
 		if (HIWORD(wParam) == EN_CHANGE) {
@@ -657,9 +876,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				if (pImage->GetRawFormat(&guid1) != Gdiplus::Ok) continue;
 				if (guid1 == Gdiplus::ImageFormatGIF && pImage->m_lpByte) {
 					lpszMediaType = L"image/gif";
-				} else if (guid1 == Gdiplus::ImageFormatJPEG || guid1 == Gdiplus::ImageFormatEXIF) {
+				}
+				else if (guid1 == Gdiplus::ImageFormatJPEG || guid1 == Gdiplus::ImageFormatEXIF) {
 					lpszMediaType = L"image/jpeg";
-				} else {
+				}
+				else {
 					lpszMediaType = L"image/png";
 				}
 				GUID guid2;
@@ -668,7 +889,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				if (pImage->m_lpByte) {
 					WCHAR szURL[256];
 					MediaUpload(lpszServer, szAccessToken, lpszMediaType, pImage->m_lpByte, (int)pImage->m_nSize, szURL, &nMediaID);
-				} else {
+				}
+				else {
 					IStream *pStream = NULL;
 					if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
 						if (pImage->Save(pStream, &guid2) == S_OK) {
@@ -691,7 +913,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				}
 				if (nMediaID) {
 					mediaIds.push_back(nMediaID);
-				} else {
+				}
+				else {
 					WCHAR szText[512];
 					wsprintf(szText, TEXT("トゥートの投稿に失敗しました。\r\n%d 番目の添付メディアのアップロードに失敗しました。"), i + 1);
 					g_hHook = SetWindowsHookEx(WH_CBT, CBTProc, 0, GetCurrentThreadId());
