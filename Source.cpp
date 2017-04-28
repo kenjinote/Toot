@@ -52,176 +52,194 @@ Gdiplus::Bitmap* LoadBitmapFromResource(int nID, LPCWSTR lpszType)
 	return pBitmap;
 }
 
-std::wstring Trim(const std::wstring& string, LPCWSTR trimCharacterList = L" \"\t\v\r\n") {
-	std::wstring result;
-	std::wstring::size_type left = string.find_first_not_of(trimCharacterList);
-	if (left != std::wstring::npos) {
-		std::wstring::size_type right = string.find_last_not_of(trimCharacterList);
-		result = string.substr(left, right - left + 1);
-	}
-	return result;
-}
-
-BOOL GetValueFromJSON(LPCWSTR lpszJson, LPCWSTR lpszKey, LPWSTR lpszValue) {
-	std::wstring json(lpszJson);
-	std::wstring key(lpszKey);
-	key = L"\"" + key + L"\"";
-	size_t posStart = json.find(key);
-	if (posStart == std::wstring::npos) return FALSE;
-	posStart += key.length();
-	posStart = json.find(L':', posStart);
-	if (posStart == std::wstring::npos) return FALSE;
-	++posStart;
-	size_t posEnd = json.find(L',', posStart);
-	if (posEnd == std::wstring::npos) {
-		posEnd = json.find(L'}', posStart);
-		if (posEnd == std::wstring::npos) return FALSE;
-	}
-	std::wstring value(json, posStart, posEnd - posStart);
-	value = Trim(value);
-	lstrcpyW(lpszValue, value.c_str());
-	return TRUE;
-}
-
-LPWSTR Post(LPCWSTR lpszServer, LPCWSTR lpszPath, LPCWSTR lpszHeader, LPBYTE lpbyData, int nSize) {
-	LPWSTR lpszReturn = 0;
-	const HINTERNET hInternet = InternetOpenW(L"WinInet Toot Program", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-	if (!hInternet) goto END1;
-	const HINTERNET hHttpSession = InternetConnectW(hInternet, lpszServer, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-	if (!hHttpSession) goto END2;
-	const HINTERNET hHttpRequest = HttpOpenRequestW(hHttpSession, L"POST", lpszPath, NULL, 0, NULL, INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD, 0);
-	if (!hHttpRequest) goto END3;
-	if (HttpSendRequestW(hHttpRequest, lpszHeader, lstrlenW(lpszHeader), lpbyData, nSize) == FALSE) goto END4;
-	{
-		LPBYTE lpszByte = (LPBYTE)GlobalAlloc(GPTR, 1);
-		DWORD dwRead, dwSize = 0;
-		static BYTE szBuffer[1024 * 4];
-		for (;;) {
-			if (!InternetReadFile(hHttpRequest, szBuffer, (DWORD)sizeof(szBuffer), &dwRead) || !dwRead) break;
-			LPBYTE lpTemp = (LPBYTE)GlobalReAlloc(lpszByte, (SIZE_T)(dwSize + dwRead + 1), GMEM_MOVEABLE);
-			if (lpTemp == NULL) break;
-			lpszByte = lpTemp;
-			CopyMemory(lpszByte + dwSize, szBuffer, dwRead);
-			dwSize += dwRead;
+class Mastodon {
+	LPWSTR m_lpszServer;
+	WCHAR m_szClientID[65];
+	WCHAR m_szSecret[65];
+	static std::wstring Trim(const std::wstring& string, LPCWSTR trimCharacterList = L" \"\t\v\r\n") {
+		std::wstring result;
+		std::wstring::size_type left = string.find_first_not_of(trimCharacterList);
+		if (left != std::wstring::npos) {
+			std::wstring::size_type right = string.find_last_not_of(trimCharacterList);
+			result = string.substr(left, right - left + 1);
 		}
-		lpszByte[dwSize] = 0;
-		if (lpszByte[0]) {
-			DWORD dwTextLen = MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, 0, 0);
-			lpszReturn = (LPWSTR)GlobalAlloc(GPTR, dwTextLen * sizeof(WCHAR));
-			MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, lpszReturn, dwTextLen);
+		return result;
+	}
+	static BOOL GetValueFromJSON(LPCWSTR lpszJson, LPCWSTR lpszKey, LPWSTR lpszValue) {
+		std::wstring json(lpszJson);
+		std::wstring key(lpszKey);
+		key = L"\"" + key + L"\"";
+		size_t posStart = json.find(key);
+		if (posStart == std::wstring::npos) return FALSE;
+		posStart += key.length();
+		posStart = json.find(L':', posStart);
+		if (posStart == std::wstring::npos) return FALSE;
+		++posStart;
+		size_t posEnd = json.find(L',', posStart);
+		if (posEnd == std::wstring::npos) {
+			posEnd = json.find(L'}', posStart);
+			if (posEnd == std::wstring::npos) return FALSE;
 		}
-		GlobalFree(lpszByte);
+		std::wstring value(json, posStart, posEnd - posStart);
+		value = Trim(value);
+		lstrcpyW(lpszValue, value.c_str());
+		return TRUE;
 	}
-END4:
-	InternetCloseHandle(hHttpRequest);
-END3:
-	InternetCloseHandle(hHttpSession);
-END2:
-	InternetCloseHandle(hInternet);
-END1:
-	return lpszReturn;
-}
-
-BOOL GetClientIDAndClientSecret(LPCWSTR lpszServer, LPWSTR lpszID, LPWSTR lpszSecret) {
-	BOOL bRetutnValue = FALSE;
-	CHAR szData[128];
-	lstrcpyA(szData, "client_name=TootApp&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write");
-	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/apps", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)szData, lstrlenA(szData));
-	if (lpszReturn) {
-		bRetutnValue = GetValueFromJSON(lpszReturn, L"client_id", lpszID) & GetValueFromJSON(lpszReturn, L"client_secret", lpszSecret);
-		GlobalFree(lpszReturn);
+public:
+	WCHAR m_szAccessToken[65];
+	Mastodon() : m_lpszServer(0) {
+		m_szAccessToken[0] = 0;
+		m_szClientID[0] = 0;
+		m_szSecret[0] = 0;
+	};
+	~Mastodon() {
+		GlobalFree(m_lpszServer);
 	}
-	return bRetutnValue;
-}
-
-BOOL GetAccessToken(LPCWSTR lpszServer, LPCWSTR lpszID, LPCWSTR lpszSecret, LPCWSTR lpszUserName, LPCWSTR lpszPassword, LPWSTR lpszAccessToken) {
-	BOOL bRetutnValue = FALSE;
-	WCHAR szData[512];
-	wsprintfW(szData, L"scope=write&client_id=%s&client_secret=%s&grant_type=password&username=%s&password=%s", lpszID, lpszSecret, lpszUserName, lpszPassword);
-	DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
-	LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
-	WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
-	LPWSTR lpszReturn = Post(lpszServer, L"/oauth/token", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen - 1);
-	GlobalFree(lpszDataA);
-	if (lpszReturn) {
-		bRetutnValue = GetValueFromJSON(lpszReturn, L"access_token", lpszAccessToken);
-		GlobalFree(lpszReturn);
+	void SetServer(LPCWSTR lpszServer) {
+		GlobalFree(m_lpszServer);
+		m_lpszServer = (LPWSTR)GlobalAlloc(0, sizeof(WCHAR) * (lstrlenW(lpszServer) + 1));
+		lstrcpyW(m_lpszServer, lpszServer);
 	}
-	return bRetutnValue;
-}
-
-BOOL Toot(LPCWSTR lpszServer, LPCWSTR lpszAccessToken, LPCWSTR lpszMessage, LPCWSTR lpszVisibility, LPWSTR lpszCreatedAt, const std::vector<int> &mediaIds, BOOL bCheckNsfw) {
-	BOOL bRetutnValue = FALSE;
-	WCHAR szData[1024];
-	wsprintfW(szData, L"access_token=%s&status=%s&visibility=%s", lpszAccessToken, lpszMessage, lpszVisibility);
-	if (mediaIds.size()) {
-		for (auto id : mediaIds) {
-			WCHAR szID[32];
-			wsprintfW(szID, L"&media_ids[]=%d", id);
-			lstrcatW(szData, szID);
+	LPWSTR Post(LPCWSTR lpszPath, LPCWSTR lpszHeader, LPBYTE lpbyData, int nSize) const {
+		LPWSTR lpszReturn = 0;
+		if (!m_lpszServer && !m_lpszServer[0]) goto END1;
+		const HINTERNET hInternet = InternetOpenW(L"WinInet Toot Program", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+		if (!hInternet) goto END1;
+		const HINTERNET hHttpSession = InternetConnectW(hInternet, m_lpszServer, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+		if (!hHttpSession) goto END2;
+		const HINTERNET hHttpRequest = HttpOpenRequestW(hHttpSession, L"POST", lpszPath, NULL, 0, NULL, INTERNET_FLAG_SECURE | INTERNET_FLAG_RELOAD, 0);
+		if (!hHttpRequest) goto END3;
+		if (HttpSendRequestW(hHttpRequest, lpszHeader, lstrlenW(lpszHeader), lpbyData, nSize) == FALSE) goto END4;
+		{
+			LPBYTE lpszByte = (LPBYTE)GlobalAlloc(GPTR, 1);
+			DWORD dwRead, dwSize = 0;
+			static BYTE szBuffer[1024 * 4];
+			for (;;) {
+				if (!InternetReadFile(hHttpRequest, szBuffer, (DWORD)sizeof(szBuffer), &dwRead) || !dwRead) break;
+				LPBYTE lpTemp = (LPBYTE)GlobalReAlloc(lpszByte, (SIZE_T)(dwSize + dwRead + 1), GMEM_MOVEABLE);
+				if (lpTemp == NULL) break;
+				lpszByte = lpTemp;
+				CopyMemory(lpszByte + dwSize, szBuffer, dwRead);
+				dwSize += dwRead;
+			}
+			lpszByte[dwSize] = 0;
+			if (lpszByte[0]) {
+				DWORD dwTextLen = MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, 0, 0);
+				lpszReturn = (LPWSTR)GlobalAlloc(GPTR, dwTextLen * sizeof(WCHAR));
+				MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, lpszReturn, dwTextLen);
+			}
+			GlobalFree(lpszByte);
 		}
-		if (bCheckNsfw)
-			lstrcatW(szData, L"&sensitive=true");
+	END4:
+		InternetCloseHandle(hHttpRequest);
+	END3:
+		InternetCloseHandle(hHttpSession);
+	END2:
+		InternetCloseHandle(hInternet);
+	END1:
+		return lpszReturn;
 	}
-	DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
-	LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
-	WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
-	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/statuses", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen);
-	GlobalFree(lpszDataA);
-	if (lpszReturn) {
-		bRetutnValue = GetValueFromJSON(lpszReturn, L"created_at", lpszCreatedAt);
-		GlobalFree(lpszReturn);
-	}
-	return bRetutnValue;
-}
-
-VOID MakeBoundary(LPWSTR lpszBoundary) {
-	lstrcpyW(lpszBoundary, L"----Boundary");
-	lstrcatW(lpszBoundary, L"kQcRxxn2b2BGpt9a");
-}
-
-BOOL MediaUpload(LPCWSTR lpszServer, LPCWSTR lpszAccessToken, LPCWSTR lpszMediaType, LPBYTE lpbyImageData, int nDataLength, LPWSTR lpszTextURL, int *pMediaID) {
-	BOOL bRetutnValue = FALSE;
-	WCHAR szBoundary[32];
-	MakeBoundary(szBoundary);
-	WCHAR szHeader[256];
-	wsprintfW(szHeader, L"Authorization: Bearer %s\r\nContent-Type: multipart/form-data; boundary=%s", lpszAccessToken, szBoundary);
-	CHAR szMediaTypeA[16];
-	WideCharToMultiByte(CP_ACP, 0, lpszMediaType, -1, szMediaTypeA, _countof(szMediaTypeA), 0, 0);
-	CHAR szFileNameA[16];
-	lstrcpyA(szFileNameA, szMediaTypeA);
-	for (int i = 0; i < lstrlenA(szFileNameA); ++i) {
-		if (szFileNameA[i] == '/') {
-			szFileNameA[i] = '.';
-			break;
+	BOOL GetClientIDAndClientSecret() {
+		BOOL bReturnValue = FALSE;
+		CHAR szData[128];
+		lstrcpyA(szData, "client_name=TootApp&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write");
+		LPWSTR lpszReturn = Post(L"/api/v1/apps", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)szData, lstrlenA(szData));
+		if (lpszReturn) {
+			bReturnValue = GetValueFromJSON(lpszReturn, L"client_id", m_szClientID) & GetValueFromJSON(lpszReturn, L"client_secret", m_szSecret);
+			GlobalFree(lpszReturn);
 		}
+		return bReturnValue;
 	}
-	CHAR szBoundaryA[32];
-	WideCharToMultiByte(CP_ACP, 0, szBoundary, -1, szBoundaryA, _countof(szBoundaryA), 0, 0);
-	CHAR szDataBeforeA[256];
-	int nSizeBefore = wsprintfA(szDataBeforeA, "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n", szBoundaryA, szFileNameA, szMediaTypeA);
-	CHAR szDataAfterA[64];
-	int nSizeAfter = wsprintfA(szDataAfterA, "--%s--\r\n", szBoundaryA);
-	int nTotalSize = nSizeBefore + nDataLength + nSizeAfter;
-	LPBYTE lpbyData = (LPBYTE)GlobalAlloc(0, nTotalSize);
-	CopyMemory(lpbyData, szDataBeforeA, nSizeBefore);
-	CopyMemory(lpbyData + nSizeBefore, lpbyImageData, nDataLength);
-	CopyMemory(lpbyData + nSizeBefore + nDataLength, szDataAfterA, nSizeAfter);
-	LPWSTR lpszReturn = Post(lpszServer, L"/api/v1/media", szHeader, lpbyData, nTotalSize);
-	GlobalFree(lpbyData);
-	if (lpszReturn) {
-		bRetutnValue = GetValueFromJSON(lpszReturn, L"url", lpszTextURL) && !wcsstr(lpszTextURL, L"/missing.");
-		if (bRetutnValue) {
-			WCHAR szMediaID[16];
-			bRetutnValue = GetValueFromJSON(lpszReturn, L"id", szMediaID);
-			if (bRetutnValue) {
-				*pMediaID = _wtol(szMediaID);
+	BOOL GetAccessToken(LPCWSTR lpszUserName, LPCWSTR lpszPassword) {
+		BOOL bReturnValue = FALSE;
+		if (!m_szClientID[0]) return bReturnValue;
+		if (!m_szSecret[0]) return bReturnValue;
+		WCHAR szData[512];
+		wsprintfW(szData, L"scope=write&client_id=%s&client_secret=%s&grant_type=password&username=%s&password=%s", m_szClientID, m_szSecret, lpszUserName, lpszPassword);
+		DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
+		LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
+		WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
+		LPWSTR lpszReturn = Post(L"/oauth/token", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen - 1);
+		GlobalFree(lpszDataA);
+		if (lpszReturn) {
+			bReturnValue = GetValueFromJSON(lpszReturn, L"access_token", m_szAccessToken);
+			GlobalFree(lpszReturn);
+		}
+		return bReturnValue;
+	}
+	BOOL Toot(LPCWSTR lpszMessage, LPCWSTR lpszVisibility, LPWSTR lpszCreatedAt, const std::vector<int> &mediaIds, BOOL bCheckNsfw) const {
+		BOOL bReturnValue = FALSE;
+		if (!m_szAccessToken[0]) return bReturnValue;
+		WCHAR szData[1024];
+		wsprintfW(szData, L"access_token=%s&status=%s&visibility=%s", m_szAccessToken, lpszMessage, lpszVisibility);
+		if (mediaIds.size()) {
+			for (auto id : mediaIds) {
+				WCHAR szID[32];
+				wsprintfW(szID, L"&media_ids[]=%d", id);
+				lstrcatW(szData, szID);
+			}
+			if (bCheckNsfw)
+				lstrcatW(szData, L"&sensitive=true");
+		}
+		DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
+		LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
+		WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
+		LPWSTR lpszReturn = Post(L"/api/v1/statuses", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen);
+		GlobalFree(lpszDataA);
+		if (lpszReturn) {
+			bReturnValue = GetValueFromJSON(lpszReturn, L"created_at", lpszCreatedAt);
+			GlobalFree(lpszReturn);
+		}
+		return bReturnValue;
+	}
+	VOID MakeBoundary(LPWSTR lpszBoundary) const {
+		lstrcpyW(lpszBoundary, L"----Boundary");
+		lstrcatW(lpszBoundary, L"kQcRxxn2b2BGpt9a");
+	}
+	BOOL MediaUpload(LPCWSTR lpszMediaType, LPBYTE lpbyImageData, int nDataLength, LPWSTR lpszTextURL, int *pMediaID) const {
+		BOOL bReturnValue = FALSE;
+		if (!m_szAccessToken[0]) return bReturnValue;
+		WCHAR szBoundary[32];
+		MakeBoundary(szBoundary);
+		WCHAR szHeader[256];
+		wsprintfW(szHeader, L"Authorization: Bearer %s\r\nContent-Type: multipart/form-data; boundary=%s", m_szAccessToken, szBoundary);
+		CHAR szMediaTypeA[16];
+		WideCharToMultiByte(CP_ACP, 0, lpszMediaType, -1, szMediaTypeA, _countof(szMediaTypeA), 0, 0);
+		CHAR szFileNameA[16];
+		lstrcpyA(szFileNameA, szMediaTypeA);
+		for (int i = 0; i < lstrlenA(szFileNameA); ++i) {
+			if (szFileNameA[i] == '/') {
+				szFileNameA[i] = '.';
+				break;
 			}
 		}
-		GlobalFree(lpszReturn);
+		CHAR szBoundaryA[32];
+		WideCharToMultiByte(CP_ACP, 0, szBoundary, -1, szBoundaryA, _countof(szBoundaryA), 0, 0);
+		CHAR szDataBeforeA[256];
+		int nSizeBefore = wsprintfA(szDataBeforeA, "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n", szBoundaryA, szFileNameA, szMediaTypeA);
+		CHAR szDataAfterA[64];
+		int nSizeAfter = wsprintfA(szDataAfterA, "--%s--\r\n", szBoundaryA);
+		int nTotalSize = nSizeBefore + nDataLength + nSizeAfter;
+		LPBYTE lpbyData = (LPBYTE)GlobalAlloc(0, nTotalSize);
+		CopyMemory(lpbyData, szDataBeforeA, nSizeBefore);
+		CopyMemory(lpbyData + nSizeBefore, lpbyImageData, nDataLength);
+		CopyMemory(lpbyData + nSizeBefore + nDataLength, szDataAfterA, nSizeAfter);
+		LPWSTR lpszReturn = Post(L"/api/v1/media", szHeader, lpbyData, nTotalSize);
+		GlobalFree(lpbyData);
+		if (lpszReturn) {
+			bReturnValue = GetValueFromJSON(lpszReturn, L"url", lpszTextURL) && !wcsstr(lpszTextURL, L"/missing.");
+			if (bReturnValue) {
+				WCHAR szMediaID[16];
+				bReturnValue = GetValueFromJSON(lpszReturn, L"id", szMediaID);
+				if (bReturnValue) {
+					*pMediaID = _wtol(szMediaID);
+				}
+			}
+			GlobalFree(lpszReturn);
+		}
+		return bReturnValue;
 	}
-	return bRetutnValue;
-}
+};
 
 class EditBox {
 	WNDPROC fnEditWndProc;
@@ -337,7 +355,7 @@ public:
 	}
 };
 
-BitmapEx * WindowCapture(HWND hWnd)
+BitmapEx* WindowCapture(HWND hWnd)
 {
 	BitmapEx * pBitmap = 0;
 	RECT rect1;
@@ -362,7 +380,7 @@ BitmapEx * WindowCapture(HWND hWnd)
 	return pBitmap;
 }
 
-BitmapEx * ScreenCapture(LPRECT lpRect)
+BitmapEx* ScreenCapture(LPRECT lpRect)
 {
 	BitmapEx * pBitmap = 0;
 	HDC hdc = GetDC(0);
@@ -420,6 +438,7 @@ LRESULT CALLBACK LayerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			else {
 				HDC hdc = GetDC(hWnd);
 				RECT rect = { min(point.x, posStart.x), min(point.y, posStart.y), max(point.x, posStart.x), max(point.y, posStart.y) };
+				OffsetRect(&rect, -GetSystemMetrics(SM_XVIRTUALSCREEN), -GetSystemMetrics(SM_YVIRTUALSCREEN));
 				HBRUSH hBrush = CreateSolidBrush(RGB(255, 0, 0));
 				HRGN hRgn1 = CreateRectRgn(OldRect.left, OldRect.top, OldRect.right, OldRect.bottom);
 				HRGN hRgn2 = CreateRectRgn(rect.left, rect.top, rect.right, rect.bottom);
@@ -566,7 +585,7 @@ class ImageListPanel {
 						_this->m_listBitmap.push_back(pBitmap);
 						InvalidateRect(hWnd, 0, 1);
 						bPushed = TRUE;
-					}					
+					}
 				}
 				if (!bPushed)
 					delete pBitmap;
@@ -753,17 +772,13 @@ LRESULT CALLBACK CBTProc(int nCode, WPARAM wParam, LPARAM lParam) {
 		RECT rectMessageBox, rectParentWnd;
 		GetWindowRect((HWND)wParam, &rectMessageBox);
 		GetWindowRect(GetParent((HWND)wParam), &rectParentWnd);
-		SetWindowPos((HWND)wParam, 0,
-			(rectParentWnd.right + rectParentWnd.left - rectMessageBox.right + rectMessageBox.left) >> 1,
-			(rectParentWnd.bottom + rectParentWnd.top - rectMessageBox.bottom + rectMessageBox.top) >> 1,
-			0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		SetWindowPos((HWND)wParam, 0, (rectParentWnd.right + rectParentWnd.left - rectMessageBox.right + rectMessageBox.left) >> 1, (rectParentWnd.bottom + rectParentWnd.top - rectMessageBox.bottom + rectMessageBox.top) >> 1, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 	}
 	return 0;
 }
 
 BOOL GetEncoderClsid(LPCWSTR format, CLSID* pClsid) {
-	UINT  num = 0;
-	UINT  size = 0;
+	UINT  num = 0, size = 0;
 	Gdiplus::GetImageEncodersSize(&num, &size);
 	if (size == 0) return FALSE;
 	Gdiplus::ImageCodecInfo* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(GlobalAlloc(0, size));
@@ -792,8 +807,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	static ImageListPanel *pImageListPanel;
 	static HWND hCombo, hButton, hCheckNsfw;
 	static HFONT hFont;
-	static WCHAR szAccessToken[65];
 	static BOOL bModified;
+	static Mastodon* pMastodon;
 	switch (msg) {
 	case WM_CREATE:
 		hFont = CreateFontW(22, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"Yu Gothic UI");
@@ -818,6 +833,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		SendMessageW(hCombo, CB_SETCURSEL, 0, 0);
 		hButton = CreateWindowW(L"BUTTON", L"トゥート! (Ctrl + Enter)", WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)1000, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessageW(hButton, WM_SETFONT, (WPARAM)hFont, 0);
+		pMastodon = new Mastodon;
 		DragAcceptFiles(hWnd, TRUE);
 		break;
 	case WM_DROPFILES:
@@ -850,22 +866,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			LPWSTR lpszUserName = 0;
 			LPWSTR lpszPassword = 0;
 			LPWSTR lpszMessage = 0;
-			lpszServer = GetText(pEdit1->m_hWnd);
-			URL_COMPONENTSW uc = { sizeof(uc) };
-			uc.dwHostNameLength = (DWORD)GlobalSize(lpszServer);
-			uc.lpszHostName = (LPWSTR)GlobalAlloc(0, uc.dwHostNameLength);
-			if (InternetCrackUrlW(lpszServer, 0, 0, &uc)) {
-				lstrcpyW(lpszServer, uc.lpszHostName);
-			}
-			GlobalFree(uc.lpszHostName);
-			if (bModified || !lstrlenW(szAccessToken)) {
+			if (bModified || !lstrlenW(pMastodon->m_szAccessToken)) {
 				InternetSetOption(0, INTERNET_OPTION_END_BROWSER_SESSION, 0, 0);
-				WCHAR szClientID[65];
-				WCHAR szSecret[65];
-				if (!GetClientIDAndClientSecret(lpszServer, szClientID, szSecret)) goto END;
+				lpszServer = GetText(pEdit1->m_hWnd);
+				URL_COMPONENTSW uc = { sizeof(uc) };
+				uc.dwHostNameLength = (DWORD)GlobalSize(lpszServer);
+				uc.lpszHostName = (LPWSTR)GlobalAlloc(0, uc.dwHostNameLength);
+				if (InternetCrackUrlW(lpszServer, 0, 0, &uc)) {
+					lstrcpyW(lpszServer, uc.lpszHostName);
+				}
+				GlobalFree(uc.lpszHostName);
+				pMastodon->SetServer(lpszServer);
+				if (!pMastodon->GetClientIDAndClientSecret()) goto END;
 				lpszUserName = GetText(pEdit2->m_hWnd);
 				lpszPassword = GetText(pEdit3->m_hWnd);
-				if (!GetAccessToken(lpszServer, szClientID, szSecret, lpszUserName, lpszPassword, szAccessToken)) goto END;
+				if (!pMastodon->GetAccessToken(lpszUserName, lpszPassword)) goto END;
 				bModified = FALSE;
 			}
 			int nImageCount = pImageListPanel->GetImageCount();
@@ -888,7 +903,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				int nMediaID = 0;
 				if (pImage->m_lpByte) {
 					WCHAR szURL[256];
-					MediaUpload(lpszServer, szAccessToken, lpszMediaType, pImage->m_lpByte, (int)pImage->m_nSize, szURL, &nMediaID);
+					pMastodon->MediaUpload(lpszMediaType, pImage->m_lpByte, (int)pImage->m_nSize, szURL, &nMediaID);
 				}
 				else {
 					IStream *pStream = NULL;
@@ -903,7 +918,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 									ULONG ulBytesRead;
 									pStream->Read(baPicture, (ULONG)ulnSize.QuadPart, &ulBytesRead);
 									WCHAR szURL[256];
-									MediaUpload(lpszServer, szAccessToken, lpszMediaType, baPicture, (int)ulnSize.QuadPart, szURL, &nMediaID);
+									pMastodon->MediaUpload(lpszMediaType, baPicture, (int)ulnSize.QuadPart, szURL, &nMediaID);
 									GlobalFree(baPicture);
 								}
 							}
@@ -926,7 +941,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			const int nVisibility = (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0);
 			LPCWSTR lpszVisibility = (LPCWSTR)SendMessageW(hCombo, CB_GETITEMDATA, nVisibility, 0);
 			WCHAR szCreatedAt[32];
-			if (!Toot(lpszServer, szAccessToken, lpszMessage, lpszVisibility, szCreatedAt, mediaIds, (BOOL)SendMessageW(hCheckNsfw, BM_GETCHECK, 0, 0))) goto END;
+			if (!pMastodon->Toot(lpszMessage, lpszVisibility, szCreatedAt, mediaIds, (BOOL)SendMessageW(hCheckNsfw, BM_GETCHECK, 0, 0))) goto END;
 			WCHAR szResult[1024];
 			wsprintfW(szResult, L"投稿されました。\n投稿日時 = %s", szCreatedAt);
 			g_hHook = SetWindowsHookEx(WH_CBT, CBTProc, 0, GetCurrentThreadId());
@@ -946,6 +961,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		DestroyWindow(hWnd);
 		break;
 	case WM_DESTROY:
+		delete pMastodon;
 		delete pEdit1;
 		delete pEdit2;
 		delete pEdit3;
