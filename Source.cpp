@@ -15,6 +15,7 @@
 #include <string>
 #include <list>
 #include <vector>
+#include "json11.hpp"
 #include "resource.h"
 
 Gdiplus::Bitmap* LoadBitmapFromResource(int nID, LPCWSTR lpszType)
@@ -56,34 +57,23 @@ class Mastodon {
 	LPWSTR m_lpszServer;
 	WCHAR m_szClientID[65];
 	WCHAR m_szSecret[65];
-	static std::wstring Trim(const std::wstring& string, LPCWSTR trimCharacterList = L" \"\t\v\r\n") {
-		std::wstring result;
-		std::wstring::size_type left = string.find_first_not_of(trimCharacterList);
-		if (left != std::wstring::npos) {
-			std::wstring::size_type right = string.find_last_not_of(trimCharacterList);
-			result = string.substr(left, right - left + 1);
-		}
-		return result;
+	static BOOL GetStringFromJSON(LPCSTR lpszJson, LPCSTR lpszKey, LPSTR lpszValue) {
+		std::string src(lpszJson);
+		std::string err;
+		json11::Json v = json11::Json::parse(src, err);
+		if (!err.size()) return FALSE;
+		lpszValue[0] = 0;
+		lstrcpyA(lpszValue, v[lpszKey].string_value().c_str());
+		return lstrlenA(lpszValue) > 0;
 	}
-	static BOOL GetValueFromJSON(LPCWSTR lpszJson, LPCWSTR lpszKey, LPWSTR lpszValue) {
-		std::wstring json(lpszJson);
-		std::wstring key(lpszKey);
-		key = L"\"" + key + L"\"";
-		size_t posStart = json.find(key);
-		if (posStart == std::wstring::npos) return FALSE;
-		posStart += key.length();
-		posStart = json.find(L':', posStart);
-		if (posStart == std::wstring::npos) return FALSE;
-		++posStart;
-		size_t posEnd = json.find(L',', posStart);
-		if (posEnd == std::wstring::npos) {
-			posEnd = json.find(L'}', posStart);
-			if (posEnd == std::wstring::npos) return FALSE;
-		}
-		std::wstring value(json, posStart, posEnd - posStart);
-		value = Trim(value);
-		lstrcpyW(lpszValue, value.c_str());
-		return TRUE;
+	static BOOL GetIntegerFromJSON(LPCSTR lpszJson, LPCSTR lpszKey, LPINT lpInt) {
+		std::string src(lpszJson);
+		std::string err;
+		json11::Json v = json11::Json::parse(src, err);
+		if (!err.size()) return FALSE;
+		*lpInt = 0;
+		*lpInt = v[lpszKey].int_value();
+		return *lpInt > 0;
 	}
 public:
 	WCHAR m_szAccessToken[65];
@@ -100,8 +90,8 @@ public:
 		m_lpszServer = (LPWSTR)GlobalAlloc(0, sizeof(WCHAR) * (lstrlenW(lpszServer) + 1));
 		lstrcpyW(m_lpszServer, lpszServer);
 	}
-	LPWSTR Post(LPCWSTR lpszPath, LPCWSTR lpszHeader, LPBYTE lpbyData, int nSize) const {
-		LPWSTR lpszReturn = 0;
+	LPSTR Post(LPCWSTR lpszPath, LPCWSTR lpszHeader, LPBYTE lpbyData, int nSize) const {
+		LPSTR lpszReturn = 0;
 		if (!m_lpszServer && !m_lpszServer[0]) goto END1;
 		const HINTERNET hInternet = InternetOpenW(L"WinInet Toot Program", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 		if (!hInternet) goto END1;
@@ -123,12 +113,7 @@ public:
 				dwSize += dwRead;
 			}
 			lpszByte[dwSize] = 0;
-			if (lpszByte[0]) {
-				DWORD dwTextLen = MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, 0, 0);
-				lpszReturn = (LPWSTR)GlobalAlloc(GPTR, dwTextLen * sizeof(WCHAR));
-				MultiByteToWideChar(CP_UTF8, 0, (LPSTR)lpszByte, -1, lpszReturn, dwTextLen);
-			}
-			GlobalFree(lpszByte);
+			lpszReturn = (LPSTR)lpszByte;
 		}
 	END4:
 		InternetCloseHandle(hHttpRequest);
@@ -143,9 +128,15 @@ public:
 		BOOL bReturnValue = FALSE;
 		CHAR szData[128];
 		lstrcpyA(szData, "client_name=TootApp&redirect_uris=urn:ietf:wg:oauth:2.0:oob&scopes=write");
-		LPWSTR lpszReturn = Post(L"/api/v1/apps", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)szData, lstrlenA(szData));
+		LPSTR lpszReturn = Post(L"/api/v1/apps", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)szData, lstrlenA(szData));
 		if (lpszReturn) {
-			bReturnValue = GetValueFromJSON(lpszReturn, L"client_id", m_szClientID) & GetValueFromJSON(lpszReturn, L"client_secret", m_szSecret);
+			CHAR szClientID[65];
+			CHAR szSecret[65];
+			bReturnValue = GetStringFromJSON(lpszReturn, "client_id", szClientID) & GetStringFromJSON(lpszReturn, "client_secret", szSecret);
+			if (bReturnValue){
+				MultiByteToWideChar(CP_ACP, 0, szClientID, -1, m_szClientID, _countof(m_szClientID));
+				MultiByteToWideChar(CP_ACP, 0, szSecret, -1, m_szSecret, _countof(m_szSecret));
+			}
 			GlobalFree(lpszReturn);
 		}
 		return bReturnValue;
@@ -159,10 +150,14 @@ public:
 		DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
 		LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
 		WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
-		LPWSTR lpszReturn = Post(L"/oauth/token", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen - 1);
+		LPSTR lpszReturn = Post(L"/oauth/token", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen - 1);
 		GlobalFree(lpszDataA);
 		if (lpszReturn) {
-			bReturnValue = GetValueFromJSON(lpszReturn, L"access_token", m_szAccessToken);
+			CHAR szAccessToken[65];
+			bReturnValue = GetStringFromJSON(lpszReturn, "access_token", szAccessToken);
+			if (bReturnValue) {
+				MultiByteToWideChar(CP_ACP, 0, szAccessToken, -1, m_szAccessToken, _countof(m_szAccessToken));
+			}
 			GlobalFree(lpszReturn);
 		}
 		return bReturnValue;
@@ -184,10 +179,14 @@ public:
 		DWORD dwTextLen = WideCharToMultiByte(CP_UTF8, 0, szData, -1, 0, 0, 0, 0);
 		LPSTR lpszDataA = (LPSTR)GlobalAlloc(GPTR, dwTextLen);
 		WideCharToMultiByte(CP_UTF8, 0, szData, -1, lpszDataA, dwTextLen, 0, 0);
-		LPWSTR lpszReturn = Post(L"/api/v1/statuses", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen);
+		LPSTR lpszReturn = Post(L"/api/v1/statuses", L"Content-Type: application/x-www-form-urlencoded", (LPBYTE)lpszDataA, dwTextLen);
 		GlobalFree(lpszDataA);
 		if (lpszReturn) {
-			bReturnValue = GetValueFromJSON(lpszReturn, L"created_at", lpszCreatedAt);
+			CHAR szCreatedAt[32];
+			bReturnValue = GetStringFromJSON(lpszReturn, "created_at", szCreatedAt);
+			if (bReturnValue) {
+				MultiByteToWideChar(CP_ACP, 0, szCreatedAt, -1, lpszCreatedAt, 32);
+			}
 			GlobalFree(lpszReturn);
 		}
 		return bReturnValue;
@@ -224,16 +223,13 @@ public:
 		CopyMemory(lpbyData, szDataBeforeA, nSizeBefore);
 		CopyMemory(lpbyData + nSizeBefore, lpbyImageData, nDataLength);
 		CopyMemory(lpbyData + nSizeBefore + nDataLength, szDataAfterA, nSizeAfter);
-		LPWSTR lpszReturn = Post(L"/api/v1/media", szHeader, lpbyData, nTotalSize);
+		LPSTR lpszReturn = Post(L"/api/v1/media", szHeader, lpbyData, nTotalSize);
 		GlobalFree(lpbyData);
 		if (lpszReturn) {
-			bReturnValue = GetValueFromJSON(lpszReturn, L"url", lpszTextURL) && !wcsstr(lpszTextURL, L"/missing.");
+			CHAR szTextURL[256];
+			bReturnValue = GetStringFromJSON(lpszReturn, "url", szTextURL) && !strstr(szTextURL, "/missing.");
 			if (bReturnValue) {
-				WCHAR szMediaID[16];
-				bReturnValue = GetValueFromJSON(lpszReturn, L"id", szMediaID);
-				if (bReturnValue) {
-					*pMediaID = _wtol(szMediaID);
-				}
+				bReturnValue = GetIntegerFromJSON(lpszReturn, "id", pMediaID);
 			}
 			GlobalFree(lpszReturn);
 		}
