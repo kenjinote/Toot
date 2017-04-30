@@ -61,7 +61,7 @@ class Mastodon {
 		std::string src(lpszJson);
 		std::string err;
 		json11::Json v = json11::Json::parse(src, err);
-		if (!err.size()) return FALSE;
+		if (err.size()) return FALSE;
 		lpszValue[0] = 0;
 		lstrcpyA(lpszValue, v[lpszKey].string_value().c_str());
 		return lstrlenA(lpszValue) > 0;
@@ -70,7 +70,7 @@ class Mastodon {
 		std::string src(lpszJson);
 		std::string err;
 		json11::Json v = json11::Json::parse(src, err);
-		if (!err.size()) return FALSE;
+		if (err.size()) return FALSE;
 		*lpInt = 0;
 		*lpInt = v[lpszKey].int_value();
 		return *lpInt > 0;
@@ -134,8 +134,8 @@ public:
 			CHAR szSecret[65];
 			bReturnValue = GetStringFromJSON(lpszReturn, "client_id", szClientID) & GetStringFromJSON(lpszReturn, "client_secret", szSecret);
 			if (bReturnValue){
-				MultiByteToWideChar(CP_ACP, 0, szClientID, -1, m_szClientID, _countof(m_szClientID));
-				MultiByteToWideChar(CP_ACP, 0, szSecret, -1, m_szSecret, _countof(m_szSecret));
+				MultiByteToWideChar(CP_UTF8, 0, szClientID, -1, m_szClientID, _countof(m_szClientID));
+				MultiByteToWideChar(CP_UTF8, 0, szSecret, -1, m_szSecret, _countof(m_szSecret));
 			}
 			GlobalFree(lpszReturn);
 		}
@@ -156,7 +156,7 @@ public:
 			CHAR szAccessToken[65];
 			bReturnValue = GetStringFromJSON(lpszReturn, "access_token", szAccessToken);
 			if (bReturnValue) {
-				MultiByteToWideChar(CP_ACP, 0, szAccessToken, -1, m_szAccessToken, _countof(m_szAccessToken));
+				MultiByteToWideChar(CP_UTF8, 0, szAccessToken, -1, m_szAccessToken, _countof(m_szAccessToken));
 			}
 			GlobalFree(lpszReturn);
 		}
@@ -185,7 +185,7 @@ public:
 			CHAR szCreatedAt[32];
 			bReturnValue = GetStringFromJSON(lpszReturn, "created_at", szCreatedAt);
 			if (bReturnValue) {
-				MultiByteToWideChar(CP_ACP, 0, szCreatedAt, -1, lpszCreatedAt, 32);
+				MultiByteToWideChar(CP_UTF8, 0, szCreatedAt, -1, lpszCreatedAt, 32);
 			}
 			GlobalFree(lpszReturn);
 		}
@@ -203,7 +203,7 @@ public:
 		WCHAR szHeader[256];
 		wsprintfW(szHeader, L"Authorization: Bearer %s\r\nContent-Type: multipart/form-data; boundary=%s", m_szAccessToken, szBoundary);
 		CHAR szMediaTypeA[16];
-		WideCharToMultiByte(CP_ACP, 0, lpszMediaType, -1, szMediaTypeA, _countof(szMediaTypeA), 0, 0);
+		WideCharToMultiByte(CP_UTF8, 0, lpszMediaType, -1, szMediaTypeA, _countof(szMediaTypeA), 0, 0);
 		CHAR szFileNameA[16];
 		lstrcpyA(szFileNameA, szMediaTypeA);
 		for (int i = 0; i < lstrlenA(szFileNameA); ++i) {
@@ -213,7 +213,7 @@ public:
 			}
 		}
 		CHAR szBoundaryA[32];
-		WideCharToMultiByte(CP_ACP, 0, szBoundary, -1, szBoundaryA, _countof(szBoundaryA), 0, 0);
+		WideCharToMultiByte(CP_UTF8, 0, szBoundary, -1, szBoundaryA, _countof(szBoundaryA), 0, 0);
 		CHAR szDataBeforeA[256];
 		int nSizeBefore = wsprintfA(szDataBeforeA, "--%s\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n", szBoundaryA, szFileNameA, szMediaTypeA);
 		CHAR szDataAfterA[64];
