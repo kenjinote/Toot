@@ -18,6 +18,8 @@
 #include "json11.hpp"
 #include "resource.h"
 
+#define ID_POST 1000
+
 Gdiplus::Bitmap* LoadBitmapFromResource(int nID, LPCWSTR lpszType)
 {
 	Gdiplus::Bitmap* pBitmap = 0;
@@ -827,7 +829,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		SendMessageW(hCombo, CB_SETITEMDATA, SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"自分のフォロワーに公開"), (LPARAM)L"private");
 		SendMessageW(hCombo, CB_SETITEMDATA, SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)L"非公開・ダイレクトメッセージ（自分と@ユーザーのみ閲覧可）"), (LPARAM)L"direct");
 		SendMessageW(hCombo, CB_SETCURSEL, 0, 0);
-		hButton = CreateWindowW(L"BUTTON", L"トゥート! (Ctrl + Enter)", WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)1000, ((LPCREATESTRUCT)lParam)->hInstance, 0);
+		hButton = CreateWindowW(L"BUTTON", L"トゥート! (Ctrl + Enter)", WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)ID_POST, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 		SendMessageW(hButton, WM_SETFONT, (WPARAM)hFont, 0);
 		pMastodon = new Mastodon;
 		DragAcceptFiles(hWnd, TRUE);
@@ -856,7 +858,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			InvalidateRect((HWND)lParam, 0, 0);
 			if ((pEdit1 && pEdit1->m_hWnd == (HWND)lParam) || (pEdit2 && pEdit2->m_hWnd == (HWND)lParam)) bModified = TRUE;
 		}
-		else if (LOWORD(wParam) == 1000) {
+		else if (LOWORD(wParam) == ID_POST) {
 			std::vector<int> mediaIds;
 			LPWSTR lpszServer = 0;
 			LPWSTR lpszUserName = 0;
@@ -983,7 +985,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 	const HWND hWnd = CreateWindowW(lpszClassName, L"トゥートする", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, 0, 512, 800, 0, 0, hInstance, 0);
 	ShowWindow(hWnd, SW_SHOWDEFAULT);
 	UpdateWindow(hWnd);
-	ACCEL Accel[] = { { FVIRTKEY | FCONTROL,VK_RETURN,1000 } };
+	ACCEL Accel[] = { { FVIRTKEY | FCONTROL,VK_RETURN,ID_POST } };
 	HACCEL hAccel = CreateAcceleratorTable(Accel, _countof(Accel));
 	while (GetMessage(&msg, 0, 0, 0)) {
 		if (!TranslateAccelerator(hWnd, hAccel, &msg) && !IsDialogMessage(hWnd, &msg)) {
