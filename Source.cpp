@@ -139,7 +139,7 @@ public:
 	}
 	LPSTR Post(LPCWSTR lpszPath, LPCWSTR lpszHeader, LPBYTE lpbyData, int nSize) const {
 		LPSTR lpszReturn = 0;
-		if (!m_lpszServer && !m_lpszServer[0]) goto END1;
+		if (!m_lpszServer || !m_lpszServer[0]) goto END1;
 		const HINTERNET hInternet = InternetOpenW(L"WinInet Toot Program", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 		if (!hInternet) goto END1;
 		const HINTERNET hHttpSession = InternetConnectW(hInternet, m_lpszServer, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
