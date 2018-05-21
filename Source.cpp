@@ -77,6 +77,15 @@ class Mastodon {
 		*lpInt = v[lpszKey].int_value();
 		return *lpInt > 0;
 	}
+	static BOOL GetLongIntegerFromJSON(LPCSTR lpszJson, LPCSTR lpszKey, PLONGLONG lpLongInt) {
+		std::string src(lpszJson);
+		std::string err;
+		json11::Json v = json11::Json::parse(src, err);
+		if (err.size()) return FALSE;
+		*lpLongInt = 0;
+		*lpLongInt = atoll(v[lpszKey].string_value().c_str());
+		return *lpLongInt > 0;
+	}
 public:
 	WCHAR m_szAccessToken[65];
 	Mastodon() : m_lpszServer(0) {
@@ -164,7 +173,7 @@ public:
 		}
 		return bReturnValue;
 	}
-	BOOL Toot(LPCWSTR lpszMessage, LPCWSTR lpszVisibility, LPWSTR lpszCreatedAt, const std::vector<int> &mediaIds, BOOL bCheckNsfw) const {
+	BOOL Toot(LPCWSTR lpszMessage, LPCWSTR lpszVisibility, LPWSTR lpszCreatedAt, const std::vector<LONGLONG> &mediaIds, BOOL bCheckNsfw) const {
 		BOOL bReturnValue = FALSE;
 		if (!m_szAccessToken[0]) return bReturnValue;
 		WCHAR szData[1024];
@@ -172,7 +181,7 @@ public:
 		if (mediaIds.size()) {
 			for (auto id : mediaIds) {
 				WCHAR szID[32];
-				wsprintfW(szID, L"&media_ids[]=%d", id);
+				wsprintfW(szID, L"&media_ids[]=%I64d", id);
 				lstrcatW(szData, szID);
 			}
 			if (bCheckNsfw)
@@ -197,7 +206,7 @@ public:
 		lstrcpyW(lpszBoundary, L"----Boundary");
 		lstrcatW(lpszBoundary, L"kQcRxxn2b2BGpt9a");
 	}
-	BOOL MediaUpload(LPCWSTR lpszMediaType, LPBYTE lpbyImageData, int nDataLength, LPWSTR lpszTextURL, int *pMediaID) const {
+	BOOL MediaUpload(LPCWSTR lpszMediaType, LPBYTE lpbyImageData, int nDataLength, LPWSTR lpszTextURL, PLONGLONG pMediaID) const {
 		BOOL bReturnValue = FALSE;
 		if (!m_szAccessToken[0]) return bReturnValue;
 		WCHAR szBoundary[32];
@@ -231,7 +240,7 @@ public:
 			CHAR szTextURL[256];
 			bReturnValue = GetStringFromJSON(lpszReturn, "url", szTextURL) && !strstr(szTextURL, "/missing.");
 			if (bReturnValue) {
-				bReturnValue = GetIntegerFromJSON(lpszReturn, "id", pMediaID);
+				bReturnValue = GetLongIntegerFromJSON(lpszReturn, "id", pMediaID);
 			}
 			GlobalFree(lpszReturn);
 		}
@@ -859,7 +868,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			if ((pEdit1 && pEdit1->m_hWnd == (HWND)lParam) || (pEdit2 && pEdit2->m_hWnd == (HWND)lParam)) bModified = TRUE;
 		}
 		else if (LOWORD(wParam) == ID_POST) {
-			std::vector<int> mediaIds;
+			std::vector<LONGLONG> mediaIds;
 			LPWSTR lpszServer = 0;
 			LPWSTR lpszUserName = 0;
 			LPWSTR lpszPassword = 0;
@@ -898,7 +907,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				}
 				GUID guid2;
 				GetEncoderClsid(lpszMediaType, &guid2);
-				int nMediaID = 0;
+				LONGLONG nMediaID = 0;
 				if (pImage->m_lpByte) {
 					WCHAR szURL[256];
 					pMastodon->MediaUpload(lpszMediaType, pImage->m_lpByte, (int)pImage->m_nSize, szURL, &nMediaID);
