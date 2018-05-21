@@ -55,6 +55,42 @@ Gdiplus::Bitmap* LoadBitmapFromResource(int nID, LPCWSTR lpszType)
 	return pBitmap;
 }
 
+int UrlEncode(LPCWSTR lpszSrc, LPWSTR lpszDst)
+{
+	DWORD iDst = 0;
+	const DWORD dwTextLengthA = WideCharToMultiByte(CP_UTF8, 0, lpszSrc, -1, 0, 0, 0, 0);
+	LPSTR szUTF8TextA = (LPSTR)GlobalAlloc(GMEM_FIXED, dwTextLengthA); // NULL を含んだ文字列バッファを確保
+	if (szUTF8TextA)
+	{
+		if (WideCharToMultiByte(CP_UTF8, 0, lpszSrc, -1, szUTF8TextA, dwTextLengthA, 0, 0))
+		{
+			for (DWORD iSrc = 0; iSrc < dwTextLengthA && szUTF8TextA[iSrc] != '\0'; ++iSrc)
+			{
+				LPCSTR lpszUnreservedCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+				if (StrChrA(lpszUnreservedCharacters, szUTF8TextA[iSrc]))
+				{
+					if (lpszDst) lpszDst[iDst] = (WCHAR)szUTF8TextA[iSrc];
+					++iDst;
+				}
+				else if (szUTF8TextA[iSrc] == ' ')
+				{
+					if (lpszDst) lpszDst[iDst] = L'+';
+					++iDst;
+				}
+				else
+				{
+					if (lpszDst) wsprintfW(&lpszDst[iDst], L"%%%02X", szUTF8TextA[iSrc] & 0xFF);
+					iDst += 3;
+				}
+			}
+			if (lpszDst) lpszDst[iDst] = L'\0';
+			++iDst;
+		}
+		GlobalFree(szUTF8TextA);
+	}
+	return iDst; // NULL 文字を含む
+}
+
 class Mastodon {
 	LPWSTR m_lpszServer;
 	WCHAR m_szClientID[65];
@@ -176,8 +212,12 @@ public:
 	BOOL Toot(LPCWSTR lpszMessage, LPCWSTR lpszVisibility, LPWSTR lpszCreatedAt, const std::vector<LONGLONG> &mediaIds, BOOL bCheckNsfw) const {
 		BOOL bReturnValue = FALSE;
 		if (!m_szAccessToken[0]) return bReturnValue;
-		WCHAR szData[1024];
-		wsprintfW(szData, L"access_token=%s&status=%s&visibility=%s", m_szAccessToken, lpszMessage, lpszVisibility);
+		WCHAR szData[1024*4];
+		const int nMessageSize = UrlEncode(lpszMessage, 0);
+		LPWSTR lpszUrlEncodedMessage = (LPWSTR)GlobalAlloc(0, nMessageSize * sizeof(WCHAR));
+		UrlEncode(lpszMessage, lpszUrlEncodedMessage);
+		swprintf(szData, L"access_token=%s&status=%s&visibility=%s", m_szAccessToken, lpszUrlEncodedMessage, lpszVisibility);
+		GlobalFree(lpszUrlEncodedMessage);
 		if (mediaIds.size()) {
 			for (auto id : mediaIds) {
 				WCHAR szID[32];
